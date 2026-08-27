@@ -20,6 +20,8 @@ macro_rules! combine_descriptors {
             }
             idx += i;
         })*
+        // Silence unused_assignments: final idx update is only needed as a write cursor.
+        let _ = idx;
 
         // Ensure the usb descriptor looks valid
         assert_configuration_valid(&data);

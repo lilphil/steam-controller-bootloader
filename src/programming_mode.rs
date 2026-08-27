@@ -251,7 +251,7 @@ static LED_BLINK_INTENSITY_LOOP: &[u16] = &[
     0xF00,   0xF4D,   0xF9C,   0xFEC,
 ];
 
-extern fn hid_get_report_handler(_handle: HidHandle, setup_packet: *const SetupPacket, buffer: *mut *mut u8, length: *mut u16) -> i32 {
+extern "C" fn hid_get_report_handler(_handle: HidHandle, setup_packet: *const SetupPacket, buffer: *mut *mut u8, length: *mut u16) -> i32 {
     match unsafe { (*setup_packet).value.high() } {
         1 | 2 => return 0x40002,
         3 => {
@@ -259,7 +259,7 @@ extern fn hid_get_report_handler(_handle: HidHandle, setup_packet: *const SetupP
                 // TOTALLY SAAAAAFE. I sure hope so at least.
                 core::slice::from_raw_parts_mut(*buffer, 0x40)
             };
-            buffer.copy_from_slice(unsafe { &HID_REPORT_PACKET });
+            buffer.copy_from_slice(unsafe { &*(&raw const HID_REPORT_PACKET) });
             unsafe { *length = 0x40 };
         },
         _ => (),
@@ -269,31 +269,33 @@ extern fn hid_get_report_handler(_handle: HidHandle, setup_packet: *const SetupP
 
 pub fn copy_hid_report(data: &mut [u8]) {
     unsafe {
-        let max_len = core::cmp::min(data.len(), HID_REPORT_PACKET.len());
-        data[..max_len].copy_from_slice(&HID_REPORT_PACKET[..max_len]);
+        let report = &*(&raw const HID_REPORT_PACKET);
+        let max_len = core::cmp::min(data.len(), report.len());
+        data[..max_len].copy_from_slice(&report[..max_len]);
     }
 }
 
 fn write_data_to_program2_flash(data: &[u8]) -> i32 {
     unsafe {
-        let mut buffer_cap = FLASH_BUFFER.len() - FLASH_BUFFER_LEN;
+        let flash_buffer = &mut *(&raw mut FLASH_BUFFER);
+        let mut buffer_cap = flash_buffer.len() - FLASH_BUFFER_LEN;
 
         if data.len() <= buffer_cap {
             buffer_cap = data.len();
         }
 
-        FLASH_BUFFER[FLASH_BUFFER_LEN..FLASH_BUFFER_LEN + buffer_cap].copy_from_slice(&data[..buffer_cap]);
+        flash_buffer[FLASH_BUFFER_LEN..FLASH_BUFFER_LEN + buffer_cap].copy_from_slice(&data[..buffer_cap]);
 
         if buffer_cap < data.len() {
             if FLASH_CUR_IDX == 0 {
                 // Put -1 in Reserved3 of vector table, to prevent accidentally
                 // booting a partially flashed
-                FLASH_BUFFER[9 * 4..10 * 4].copy_from_slice(&(-1_i32).to_le_bytes());
+                flash_buffer[9 * 4..10 * 4].copy_from_slice(&(-1_i32).to_le_bytes());
             }
             // We start from 0x2000, since that's where program2 starts.
             let flash_dst = FLASH_CUR_IDX + 0x2000;
 
-            if flash_dst + FLASH_BUFFER.len() >= 0x20_000 {
+            if flash_dst + flash_buffer.len() >= 0x20_000 {
                 return 1;
             }
 
@@ -301,12 +303,12 @@ fn write_data_to_program2_flash(data: &[u8]) -> i32 {
             if err != 0 {
                 return 1;
             }
-            let err = iap::copy_ram_to_flash(flash_dst as u32, FLASH_BUFFER.as_ptr() as usize, FLASH_BUFFER.len(), MAIN_CLOCK_FREQ / 1024);
+            let err = iap::copy_ram_to_flash(flash_dst as u32, flash_buffer.as_ptr() as usize, flash_buffer.len(), MAIN_CLOCK_FREQ / 1024);
             if err != 0 {
                 return 1;
             }
             FLASH_CUR_IDX += 0x200;
-            FLASH_BUFFER[..data.len() - buffer_cap].copy_from_slice(&data[buffer_cap..]);
+            flash_buffer[..data.len() - buffer_cap].copy_from_slice(&data[buffer_cap..]);
             FLASH_BUFFER_LEN = data.len() - buffer_cap;
         } else {
             FLASH_BUFFER_LEN += buffer_cap;
@@ -343,12 +345,13 @@ fn check_fmc_signature(expected_sig: &[u8]) -> bool {
 fn end_flash_verify_firmware_sig(sig: &[u8]) -> u32 {
     unsafe {
         if FLASH_BUFFER_LEN != 0 {
-            for elem in &mut FLASH_BUFFER[FLASH_BUFFER_LEN..] {
+            let flash_buffer = &mut *(&raw mut FLASH_BUFFER);
+            for elem in &mut flash_buffer[FLASH_BUFFER_LEN..] {
                 *elem = 0xff;
             }
             let flash_dst = FLASH_CUR_IDX + 0x2000;
 
-            if flash_dst + FLASH_BUFFER.len() >= 0x20_000 {
+            if flash_dst + flash_buffer.len() >= 0x20_000 {
                 return 1;
             }
 
@@ -356,7 +359,7 @@ fn end_flash_verify_firmware_sig(sig: &[u8]) -> u32 {
             if err != 0 {
                 return 2;
             }
-            let err = iap::copy_ram_to_flash(flash_dst as u32, FLASH_BUFFER.as_ptr() as usize, FLASH_BUFFER.len(), MAIN_CLOCK_FREQ / 1024);
+            let err = iap::copy_ram_to_flash(flash_dst as u32, flash_buffer.as_ptr() as usize, flash_buffer.len(), MAIN_CLOCK_FREQ / 1024);
             if err != 0 {
                 return 3;
             }
@@ -526,7 +529,7 @@ pub fn hid_handle_set_feature_report(wwdt: &WWDT, syscon: &SYSCON, buffer: &[u8]
     }
 }
 
-extern fn hid_set_report_handler(_handle: HidHandle, setup_packet: *const SetupPacket, buffer: *const *const u8, length: u16) -> i32 {
+extern "C" fn hid_set_report_handler(_handle: HidHandle, setup_packet: *const SetupPacket, buffer: *const *const u8, length: u16) -> i32 {
     if length != 0 {
         match unsafe { (*setup_packet).value.high() } {
             1 | 2 => return 0x40002,
@@ -556,7 +559,7 @@ fn init_usb_hid(handle: UsbHandle, hid_interface_descriptor: &mut [u8], mem_base
     /*if hid_interface_descriptor.interface_class != 3 {
         return -1;
     }*/
-    hid_param.report_data = Some(unsafe { &USB_HID_REPORT_DATA });
+    hid_param.report_data = Some(unsafe { &*(&raw const USB_HID_REPORT_DATA) });
     hid_param.get_report = Some(hid_get_report_handler);
     hid_param.set_report = Some(hid_set_report_handler);
     hid_param.mem_base = *mem_base;
@@ -598,10 +601,10 @@ fn init_usb() -> i32 {
     let mut desc = CoreDescriptors::default();
     desc.device_descriptors = Some(NonNull::from(&DEVICE_DESCRIPTOR));
     desc.string_descriptors = Some(NonNull::from(STRING_DESCRIPTOR).cast());
-    desc.high_speed_descriptors = Some(NonNull::from(unsafe { &mut CONFIGURATION_DESCRIPTOR }).cast());
-    desc.full_speed_descriptors = Some(NonNull::from(unsafe { &mut CONFIGURATION_DESCRIPTOR }).cast());
+    desc.high_speed_descriptors = Some(NonNull::from(unsafe { &mut *(&raw mut CONFIGURATION_DESCRIPTOR) }).cast());
+    desc.full_speed_descriptors = Some(NonNull::from(unsafe { &mut *(&raw mut CONFIGURATION_DESCRIPTOR) }).cast());
 
-    let err = (usb_api.hw().init)(unsafe { &mut USBD_HANDLE }, &desc, &mut init_param);
+    let err = (usb_api.hw().init)(unsafe { &mut *(&raw mut USBD_HANDLE) }, &desc, &mut init_param);
 
     if err != 0 {
         return err;
@@ -820,11 +823,11 @@ fn send_usart_packet_if_timer_elapsed() {
         if TIMER_ENABLED && TIMER_ELAPSED {
             TIMER_ELAPSED = false;
             let mut counter = [0; 4];
-            counter.copy_from_slice(&USART_PACKET[4..8]);
+            counter.copy_from_slice(&(&*(&raw const USART_PACKET))[4..8]);
             let counter = u32::from_le_bytes(counter) + 1;
-            USART_PACKET[4..8].copy_from_slice(&counter.to_le_bytes());
+            (&mut *(&raw mut USART_PACKET))[4..8].copy_from_slice(&counter.to_le_bytes());
 
-            crate::nrf_comms::usart_send_V_packet(&USART_PACKET);
+            crate::nrf_comms::usart_send_V_packet(&*(&raw const USART_PACKET));
         }
     }
 }

@@ -44,7 +44,7 @@ static mut EEPROM_CACHE: EepromData = EepromData {
 
 fn check_eeprom_magic() {
     unsafe {
-        let eeprom_magic_ptr = slice::from_raw_parts_mut(&mut EEPROM_CACHE as *mut _ as *mut u8, size_of::<EepromData>());
+        let eeprom_magic_ptr = slice::from_raw_parts_mut(&raw mut EEPROM_CACHE as *mut _ as *mut u8, size_of::<EepromData>());
         iap::eeprom_read(0, eeprom_magic_ptr, MAIN_CLOCK_FREQ / 1024);
         if EEPROM_CACHE.magic != 0xa55a {
             EEPROM_CACHE.magic = 0xa55a;
@@ -59,7 +59,7 @@ fn check_eeprom_magic() {
 }
 
 fn write_eeprom_cache() {
-    let eeprom_magic_ptr = unsafe { slice::from_raw_parts(&EEPROM_CACHE as *const _ as *const u8, size_of::<EepromData>()) };
+    let eeprom_magic_ptr = unsafe { slice::from_raw_parts(&raw const EEPROM_CACHE as *const _ as *const u8, size_of::<EepromData>()) };
     iap::eeprom_write(0, eeprom_magic_ptr, unsafe { MAIN_CLOCK_FREQ } / 1024);
 }
 

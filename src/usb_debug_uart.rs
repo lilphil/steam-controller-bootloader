@@ -57,8 +57,13 @@ static mut UCOM_DATA: UcomData<'static> = UcomData {
     ep_out_idx: 0,
 };
 
-extern fn set_line_code(_hnd: CdcHandle, _line_coding: &mut CdcLineCoding) -> i32 {
-    unsafe { UCOM_DATA.connected.set(true); }
+#[inline(always)]
+unsafe fn ucom_data() -> &'static mut UcomData<'static> {
+    &mut *(&raw mut UCOM_DATA)
+}
+
+extern "C" fn set_line_code(_hnd: CdcHandle, _line_coding: &mut CdcLineCoding) -> i32 {
+    unsafe { ucom_data().connected.set(true); }
     0
 }
 
@@ -69,9 +74,10 @@ pub fn init_usb_cdc(usb_handle: UsbHandle, cif_intf_desc: &mut [u8],
     let usb_api = RomDriver::get().usb_api();
 
     unsafe {
-        UCOM_DATA.usb = usb_handle;
-        UCOM_DATA.ep_in_idx = ep_in_idx;
-        UCOM_DATA.ep_out_idx = ep_out_idx;
+        let ucom = ucom_data();
+        ucom.usb = usb_handle;
+        ucom.ep_in_idx = ep_in_idx;
+        ucom.ep_out_idx = ep_out_idx;
     }
 
     let mut init_param = CdcInitParameter::default();
@@ -80,7 +86,7 @@ pub fn init_usb_cdc(usb_handle: UsbHandle, cif_intf_desc: &mut [u8],
     init_param.cif_intf_desc = Some(NonNull::from(cif_intf_desc).cast());
     init_param.dif_intf_desc = Some(NonNull::from(dif_intf_desc).cast());
     init_param.set_line_code = Some(set_line_code);
-    let err = (usb_api.cdc().init)(usb_handle, &mut init_param, unsafe { &mut UCOM_DATA.cdc });
+    let err = (usb_api.cdc().init)(usb_handle, &mut init_param, unsafe { &mut ucom_data().cdc });
 
     if err != 0 {
         return err
@@ -91,7 +97,7 @@ pub fn init_usb_cdc(usb_handle: UsbHandle, cif_intf_desc: &mut [u8],
         return 1;
     }
     unsafe {
-        UCOM_DATA.tx_fifo = core::slice::from_raw_parts_mut(init_param.mem_base as *mut u8, UCOM_TX_BUF_SZ);
+        ucom_data().tx_fifo = core::slice::from_raw_parts_mut(init_param.mem_base as *mut u8, UCOM_TX_BUF_SZ);
     }
     init_param.mem_base += UCOM_TX_BUF_SZ as u32;
     init_param.mem_size -= UCOM_TX_BUF_SZ as u32;
@@ -100,7 +106,7 @@ pub fn init_usb_cdc(usb_handle: UsbHandle, cif_intf_desc: &mut [u8],
         return 1;
     }
     unsafe {
-        UCOM_DATA.rx_fifo = core::slice::from_raw_parts_mut(init_param.mem_base as *mut u8, UCOM_RX_BUF_SZ);
+        ucom_data().rx_fifo = core::slice::from_raw_parts_mut(init_param.mem_base as *mut u8, UCOM_RX_BUF_SZ);
     }
     init_param.mem_base += UCOM_RX_BUF_SZ as u32;
     init_param.mem_size -= UCOM_RX_BUF_SZ as u32;
@@ -110,17 +116,17 @@ pub fn init_usb_cdc(usb_handle: UsbHandle, cif_intf_desc: &mut [u8],
 
     // Register Endpoint Interrupt Handler
     let ep_idx = ((ep_in_idx & 0x0F) << 1) + 1;
-    let err = (usb_api.core().register_ep_handler)(usb_handle, ep_idx, ucom_bulk_hdlr, unsafe { &mut UCOM_DATA } as *mut _ as *mut u8);
+    let err = (usb_api.core().register_ep_handler)(usb_handle, ep_idx, ucom_bulk_hdlr, unsafe { ucom_data() } as *mut _ as *mut u8);
     if err != 0 {
         return err;
     }
 
     let ep_idx = (ep_out_idx & 0x0F) << 1;
-    let err = (usb_api.core().register_ep_handler)(usb_handle, ep_idx, ucom_bulk_hdlr, unsafe { &mut UCOM_DATA } as *mut _ as *mut u8);
+    let err = (usb_api.core().register_ep_handler)(usb_handle, ep_idx, ucom_bulk_hdlr, unsafe { ucom_data() } as *mut _ as *mut u8);
 
     unsafe {
-        UCOM_DATA.cdc.inner_ctrl().line_coding.dte_rate = 115200;
-        UCOM_DATA.cdc.inner_ctrl().line_coding.data_bits = 8;
+        ucom_data().cdc.inner_ctrl().line_coding.dte_rate = 115200;
+        ucom_data().cdc.inner_ctrl().line_coding.data_bits = 8;
     }
 
     return err
@@ -182,7 +188,7 @@ fn usb_uart_rcv_data(ucom: &mut UcomData) {
     }
 }
 
-extern fn ucom_bulk_hdlr(_usb: UsbHandle, data: *mut u8, evt: u32) -> i32 {
+extern "C" fn ucom_bulk_hdlr(_usb: UsbHandle, data: *mut u8, evt: u32) -> i32 {
     let ucom = unsafe { (data as *mut UcomData).as_mut().unwrap() };
     match evt {
         // USB_EVT_IN
@@ -213,25 +219,26 @@ extern fn ucom_bulk_hdlr(_usb: UsbHandle, data: *mut u8, evt: u32) -> i32 {
 
 pub fn usb_putc(chara: u8) -> i32 {
     unsafe {
-        let next_wr_idx = (UCOM_DATA.tx_wr_idx + 1) % UCOM_DATA.tx_fifo.len();
+        let ucom = ucom_data();
+        let next_wr_idx = (ucom.tx_wr_idx + 1) % ucom.tx_fifo.len();
 
         // We're full already. Fuck.
-        if next_wr_idx == UCOM_DATA.tx_rd_idx.get() {
+        if next_wr_idx == ucom.tx_rd_idx.get() {
             return chara as i32;
         }
 
         // Put new character info FIFO
-        if let Some(place) = UCOM_DATA.tx_fifo.get_mut(UCOM_DATA.tx_wr_idx) {
+        if let Some(place) = ucom.tx_fifo.get_mut(ucom.tx_wr_idx) {
             *place = chara;
-            UCOM_DATA.tx_wr_idx = next_wr_idx;
+            ucom.tx_wr_idx = next_wr_idx;
         }
 
-        if UCOM_DATA.tx_busy.get() {
+        if ucom.tx_busy.get() {
             return chara as i32
         }
 
-        //if usb_tx_fifo_num_bytes(&UCOM_DATA) >= UCOM_DATA.tx_fifo.len() / 2 && UCOM_DATA.connected.get() {
-        //    usb_uart_tx_start(&mut UCOM_DATA);
+        //if usb_tx_fifo_num_bytes(ucom) >= ucom.tx_fifo.len() / 2 && ucom.connected.get() {
+        //    usb_uart_tx_start(ucom);
         //}
     }
 
@@ -271,24 +278,27 @@ pub fn usb_putnbr_base(mut n: u32, base: &[u8]) {
 
 pub fn usb_flush() {
     unsafe {
-        while UCOM_DATA.tx_busy.get() {}
+        let ucom = ucom_data();
+        while ucom.tx_busy.get() {}
 
-        usb_uart_tx_start(&mut UCOM_DATA);
+        usb_uart_tx_start(ucom);
     }
 }
 
 /*pub fn wait_until_sent() {
     // TODO: Figure this out
     unsafe {
-        while UCOM_DATA.tx_rd_idx.get() != UCOM_DATA.tx_wr_idx {}
+        let ucom = ucom_data();
+        while ucom.tx_rd_idx.get() != ucom.tx_wr_idx {}
     }
 }*/
 
-#[allow(unused)]
+#[allow(dead_code)]
 pub fn enabled() -> bool {
-    return unsafe { UCOM_DATA.connected.get() }
+    return unsafe { ucom_data().connected.get() }
 }
 
+#[allow(dead_code)]
 pub struct UartDebug;
 
 impl core::fmt::Write for UartDebug {

@@ -1,6 +1,5 @@
 use lpc11uxx::{SYSCON, FLASHCTRL};
 
-pub static CRYSTAL_OSCILLATOR_CLOCK_RATE: u32 = 12_000_000;
 pub static SYSTEM_PPL_MSET: u8 = 3;
 pub static SYSTEM_PPL_PSET: u8 = 1;
 

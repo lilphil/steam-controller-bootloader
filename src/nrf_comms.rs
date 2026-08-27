@@ -95,13 +95,13 @@ pub fn handle_interrupt(mut usart: &mut USART) {
 
     if usart.ier().read().threinten().bit_is_set() {
         while usart.lsr.read().thre().bit_is_set() {
-            if let Some(val) = unsafe { USART_WRITE_RING_BUFFER.dequeue() } {
+            if let Some(val) = unsafe { (*(&raw mut USART_WRITE_RING_BUFFER)).dequeue() } {
                 usart.thr().write(|v| unsafe { v.thr().bits(val) });
             } else {
                 break;
             }
         }
-        if unsafe { USART_WRITE_RING_BUFFER.is_empty() } {
+        if unsafe { (*(&raw const USART_WRITE_RING_BUFFER)).is_empty() } {
             usart.ier().modify(|_, v| v.threinten().clear_bit());
         }
     }
@@ -195,11 +195,11 @@ fn usart_send_raw_str(data: &[u8]) -> usize {
     peripherals.USART.ier().modify(|_, v| v.threinten().disable_the_thre_int());
 
     // Insert data to the ring buffer
-    let mut inserted_len = ring_buffer_insert_mult(unsafe { &mut USART_WRITE_RING_BUFFER }, data);
+    let mut inserted_len = ring_buffer_insert_mult(unsafe { &mut *(&raw mut USART_WRITE_RING_BUFFER) }, data);
 
     // Send the contents of the ring buffer
     while peripherals.USART.lsr.read().thre().is_empty() {
-        if let Some(val) = unsafe { USART_WRITE_RING_BUFFER .dequeue() } {
+        if let Some(val) = unsafe { (*(&raw mut USART_WRITE_RING_BUFFER)).dequeue() } {
             peripherals.USART.thr().write(|v| unsafe { v.thr().bits(val) });
         } else {
             break;
@@ -207,7 +207,7 @@ fn usart_send_raw_str(data: &[u8]) -> usize {
     }
 
     // Try to insert some more contents in the ring buffer.
-    inserted_len += ring_buffer_insert_mult(unsafe { &mut USART_WRITE_RING_BUFFER }, &data[inserted_len..]);
+    inserted_len += ring_buffer_insert_mult(unsafe { &mut *(&raw mut USART_WRITE_RING_BUFFER) }, &data[inserted_len..]);
 
     // Re-enable send interrupts
     peripherals.USART.ier().modify(|_, v| v.threinten().enable_the_thre_inte());
