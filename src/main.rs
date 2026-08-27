@@ -9,11 +9,12 @@ mod led;
 mod programming_mode;
 mod usb_debug_uart;
 mod nrf_comms;
+mod trampolines;
 
 use core::slice;
 use core::mem::size_of;
 
-use cortex_m_rt::{entry, exception};
+use cortex_m_rt::entry;
 use lpc11uxx_rom::iap;
 use lpc11uxx::*;
 
@@ -173,12 +174,11 @@ fn setup_watchdog(syscon: &SYSCON, watchdog: &WWDT, timeout: u32) {
 }
 
 fn start_program2() -> ! {
-    // Point VTOR at the app vector table so its IRQ handlers run directly.
+    // LPC11U37 has no usable VTOR — leave it at 0 and rely on trampolines
+    // (see trampolines.rs), matching stock Valve / upstream bootloader.
     unsafe {
         core::arch::asm!(
             "ldr r0, =0x2000",
-            "ldr r1, =0xE000ED08",
-            "str r0, [r1]",
             "ldr r1, [r0]",
             "msr msp, r1",
             "ldr r1, [r0, #4]",
@@ -268,37 +268,6 @@ fn main() -> ! {
     programming_mode::enter_programming_mode(core_peripherals, peripherals);
 }
 
-#[exception]
-fn DefaultHandler(_irq: i16) {
-    loop {
-        cortex_m::asm::wfi();
-    }
-}
-
-#[exception]
-fn HardFault(_frame: &cortex_m_rt::ExceptionFrame) -> ! {
-    loop {
-        cortex_m::asm::wfi();
-    }
-}
-
-// Programming-mode handlers only — app IRQs use VTOR after start_program2.
-#[exception]
-fn PendSV() {
-    programming_mode::PendSV();
-}
-
-#[interrupt]
-fn CT32B1() {
-    programming_mode::CT32B1();
-}
-
-#[interrupt]
-fn USART() {
-    programming_mode::USART();
-}
-
-#[interrupt]
-fn USB_IRQ() {
-    programming_mode::USB_IRQ();
-}
+// Exception/IRQ entry: trampolines.rs `DefaultHandler` (PendSV/CT32B1/USART/USB
+// and all other device IRQs weakly alias to it). HardFault stays the cortex-m-rt
+// infinite loop — not required for app USB.

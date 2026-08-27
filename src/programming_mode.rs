@@ -216,41 +216,6 @@ const fn find_iface_pos(iface_num: u8) -> Option<usize> {
 
 static mut CONFIGURATION_DESCRIPTOR: [u8; CONFIGURATION_DESCRIPTOR_CONST.len()] = CONFIGURATION_DESCRIPTOR_CONST;
 
-static LED_BLINK_INTENSITY_LOOP: &[u16] = &[
-      0x0,     0x1,     0x1,     0x1,
-      0x1,     0x1,     0x2,     0x3,
-      0x4,     0x5,     0x7,     0x9,
-      0xB,     0xE,    0x11,    0x14,
-     0x18,    0x1C,    0x20,    0x24,
-     0x29,    0x2E,    0x34,    0x3A,
-     0x40,    0x47,    0x4F,    0x56,
-     0x5F,    0x67,    0x70,    0x79,
-     0x83,    0x8E,    0x99,    0xA5,
-     0xB1,    0xBD,    0xCA,    0xD7,
-     0xE5,    0xF4,   0x103,   0x112,
-    0x123,   0x133,   0x144,   0x156,
-    0x169,   0x17C,   0x18F,   0x1A3,
-    0x1B8,   0x1CD,   0x1E3,   0x1FA,
-    0x211,   0x229,   0x242,   0x25B,
-    0x274,   0x28F,   0x2AA,   0x2C6,
-    0x2E2,   0x2FF,   0x31D,   0x33B,
-    0x35B,   0x37A,   0x39B,   0x3BC,
-    0x3DE,   0x400,   0x424,   0x448,
-    0x46D,   0x492,   0x4B8,   0x4DF,
-    0x507,   0x530,   0x559,   0x583,
-    0x5AE,   0x5D9,   0x605,   0x632,
-    0x660,   0x68F,   0x6BF,   0x6EF,
-    0x720,   0x751,   0x784,   0x7B8,
-    0x7EC,   0x821,   0x857,   0x88E,
-    0x8C5,   0x8FE,   0x937,   0x971,
-    0x9AC,   0x9E8,   0xA24,   0xA62,
-    0xAA0,   0xAE0,   0xB20,   0xB61,
-    0xBA2,   0xBE5,   0xC29,   0xC6E,
-    0xCB3,   0xCF9,   0xD41,   0xD89,
-    0xDD2,   0xE1C,   0xE67,   0xEB3,
-    0xF00,   0xF4D,   0xF9C,   0xFEC,
-];
-
 extern "C" fn hid_get_report_handler(_handle: HidHandle, setup_packet: *const SetupPacket, buffer: *mut *mut u8, length: *mut u16) -> i32 {
     match unsafe { (*setup_packet).value.high() } {
         1 | 2 => return 0x40002,
@@ -451,8 +416,13 @@ pub fn hid_handle_set_feature_report(wwdt: &WWDT, syscon: &SYSCON, buffer: &[u8]
             return write_report_0x94(0);
         },
         Some(0x92) => {
-            if let Some(buffer) = buffer.get(1).and_then(|size| buffer.get(2..usize::from(*size))) {
-                let _err = write_data_to_program2_flash(buffer);
+            // Payload is [cmd, len, ...len data bytes...]. Slice must be 2..2+len,
+            // not 2..len (that drops the last 2 bytes of every chunk and breaks FMC verify).
+            if let Some(data) = buffer.get(1).and_then(|size| {
+                let size = usize::from(*size);
+                buffer.get(2..2 + size)
+            }) {
+                let _err = write_data_to_program2_flash(data);
                 let err = 0;
                 write_report_0x94(err as u16);
                 led_advance_blink();
@@ -494,8 +464,11 @@ pub fn hid_handle_set_feature_report(wwdt: &WWDT, syscon: &SYSCON, buffer: &[u8]
             return write_report_0x94(2);
         },
         Some(0x98) => {
-            if let Some(buffer) = buffer.get(1).and_then(|size| buffer.get(2..usize::from(*size))) {
-                crate::nrf_comms::usart_send_z_packet(buffer);
+            if let Some(data) = buffer.get(1).and_then(|size| {
+                let size = usize::from(*size);
+                buffer.get(2..2 + size)
+            }) {
+                crate::nrf_comms::usart_send_z_packet(data);
                 return write_report_0x94(2);
             } else {
                 return write_report_0x94(1);
@@ -718,20 +691,19 @@ fn init_led_ctrl() {
 
 fn led_advance_blink() {
     let led_blink_tick = unsafe { CUR_LED_BLINK_TICK };
-    tick_led_blink((led_blink_tick + 1) % LED_BLINK_INTENSITY_LOOP.len() as u8);
+    tick_led_blink(led_blink_tick.wrapping_add(1));
 }
 
 fn tick_led_blink(tick: u8) {
-    // This function has an out of bound in the original version (they send it
-    // 255 in enter_programming mode, but LED_BLINK_INTENSITY_LOOP only has 128
-    // values). To fix this, we default to 0. Also avoids a panic call.
+    // Approximate the old 128-entry ease-in table with a quadratic ramp to
+    // save ~256 bytes in the 8 KiB boot slot.
+    let t = u32::from(tick % 128);
+    let intensity = (t * t) / 8; // 0..~2016, CT16B1 MR0 uses lower 12 bits
     let peripherals = unsafe { Peripherals::steal() };
 
-    peripherals.CT16B1.mr[0].write(|v| unsafe {
-        v.bits(u32::from(*LED_BLINK_INTENSITY_LOOP.get(usize::from(tick)).unwrap_or(&0)))
-    });
+    peripherals.CT16B1.mr[0].write(|v| unsafe { v.bits(intensity) });
     unsafe {
-        CUR_LED_BLINK_TICK = tick
+        CUR_LED_BLINK_TICK = tick;
     };
 }
 
