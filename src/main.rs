@@ -268,6 +268,5 @@ fn main() -> ! {
     programming_mode::enter_programming_mode(core_peripherals, peripherals);
 }
 
-// Exception/IRQ entry: trampolines.rs `DefaultHandler` (PendSV/CT32B1/USART/USB
-// and all other device IRQs weakly alias to it). HardFault stays the cortex-m-rt
-// infinite loop — not required for app USB.
+// Exception/IRQ entry: trampolines.rs (stock-style per-vector forwards to the
+// app table at 0x2000; PendSV/CT32B1/USART/USB_IRQ also serve programming mode).

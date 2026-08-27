@@ -9,8 +9,10 @@ Changes from upstream (in order):
   release image **over the 8 KiB** boot slot on a modern rustc
 * Fixed PLL wait polarity (`is_pll_not_locked`)
 * Dropped `lpc11uxx-hal` (panic LED uses a busy-wait) to save space
-* Dropped trampolines thinking we could use VTOR to save space, but restored 
-  to be compatible with stock valve firmware
+* Dropped trampolines thinking we could use VTOR to save space, but restored
+  to be compatible with stock valve firmware (per-vector style: most IRQs
+  always forward to `0x2000`; only PendSV/CT32B1/USART/USB mux on GPREG1;
+  HardFault forwards to the app)
 * Dropped led intensity table to save space instead
 
 ## Dependencies

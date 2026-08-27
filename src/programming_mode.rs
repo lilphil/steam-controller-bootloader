@@ -453,6 +453,9 @@ pub fn hid_handle_set_feature_report(wwdt: &WWDT, syscon: &SYSCON, buffer: &[u8]
             //crate::usb_debug_uart::usb_putb(b"\n");
         },
         Some(0x95) => {
+            // Stock binary (vcf_wired_controller_d0g.bin +0x8f8):
+            //   if report[1]==0: usart_send_reset(\\RESET); setup_watchdog(0x2710)
+            // No SYSRESETREQ — WWDT reset only (matches Valve / Rob).
             if let Some(0) = buffer.get(1) {
                 crate::nrf_comms::usart_send_reset();
                 super::setup_watchdog(syscon, wwdt, 10_000);
