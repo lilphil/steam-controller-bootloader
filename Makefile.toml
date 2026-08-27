@@ -1,10 +1,16 @@
 [config]
 skip_core_tasks = true
-default_to_workspace = false
+# Debug images overflow the 8 KiB boot slot; always build release by default.
+default_profile = "production"
 
+[env]
+PROFILE_NAME = "release"
+COMPILER_FLAGS = "--release"
+
+# Kept so `cargo make --profile development` still gets a linkable image.
 [env.development]
-PROFILE_NAME = "debug"
-COMPILER_FLAGS = ""
+PROFILE_NAME = "release"
+COMPILER_FLAGS = "--release"
 
 [env.production]
 PROFILE_NAME = "release"
@@ -20,54 +26,19 @@ install_crate = { crate_name = "lpc_checksum", binary = "lpc_checksum", test_arg
 dependencies = ["install-llvm-tools-preview"]
 install_crate = { crate_name = "cargo-binutils", binary = "cargo-objcopy", test_arg = "--help" }
 
-# CUSTOM FIRMWARE RULES
-
-[tasks.custom-firmware-build]
-description = "Compiles custom-firmware"
-command = "cargo"
-args = ["build", "@@split(COMPILER_FLAGS, )", "--bin=custom-firmware"]
-
-[tasks.custom-firmware]
-dependencies = ["custom-firmware-build", "install-cargo-binutils"]
-command = "cargo"
-args = ["objcopy", "@@split(COMPILER_FLAGS, )", "--bin=custom-firmware", "--", "-O", "binary", "custom-firmware-${PROFILE_NAME}.bin"]
-
-[tasks.custom-firmware-patch]
-dependencies = ["install-lpc-checksum", "custom-firmware", "install-cargo-binutils"]
-command = "lpc_checksum"
-args = ["-p", "LPC11U37_501", "custom-firmware-${PROFILE_NAME}.bin"]
-
-[tasks.custom-firmware-install]
-dependencies = ["custom-firmware-patch", "install-cargo-binutils"]
-command = "cp"
-args = ["custom-firmware-${PROFILE_NAME}.bin", "/mnt/i/firmware.bin"]
-
-[tasks.custom-firmware-clean]
-script_runner = "@shell"
-script = [
-    '''
-        rm -f custom-firmware-debug.bin
-        rm -f custom-firmware-release.bin
-    '''
-]
-
-# BOOTLOADER RULES
-
 [tasks.bootloader-build]
 dependencies = ["install-cargo-binutils"]
-description = "Compiles bootloader firmware"
+description = "Compiles bootloader firmware (release; fits 8 KiB)"
 command = "cargo"
-args = ["objcopy", "@@split(COMPILER_FLAGS, )", "--bin=bootloader", "--", "-O", "binary", "bootloader-${PROFILE_NAME}.bin"]
+args = ["objcopy", "--release", "--bin=steam-controller-bootloader", "--", "-O", "binary", "bootloader-release.bin"]
 
 [tasks.bootloader-patch]
-dependencies = ["install-lpc-checksum", "bootloader-build", "install-cargo-binutils"]
-#command = "lpc_checksum"
-#args = ["-p", "LPC11U37_501", "bootloader-${PROFILE_NAME}.bin"]
+dependencies = ["install-lpc-checksum", "bootloader-build"]
 script = [
     '''
-    lpc_checksum -p LPC11U37_501 bootloader-${PROFILE_NAME}.bin
+    lpc_checksum -p LPC11U37_501 bootloader-release.bin
     # Insert custom version identifier.
-    echo BEBAFECA | xxd -r -ps | dd conv=notrunc of=bootloader-${PROFILE_NAME}.bin seek=36 bs=1
+    echo BEBAFECA | xxd -r -ps | dd conv=notrunc of=bootloader-release.bin seek=36 bs=1
     '''
 ]
 
@@ -80,22 +51,18 @@ script = [
     '''
 ]
 
-# GENERIC RULES
-
 [tasks.clean]
-workspace = false
-dependencies = ["custom-firmware-clean", "bootloader-clean"]
+dependencies = ["bootloader-clean"]
 description = "Clean workspace"
 command = "cargo"
 args = ["clean"]
 
 [tasks.clippy]
-workspace = false
 command = "cargo"
-args = ["clippy"]
+args = ["clippy", "--release"]
 
 [tasks.build]
-dependencies = ["custom-firmware-install"]
+dependencies = ["bootloader-patch"]
 
 [tasks.default]
 dependencies = ["build"]

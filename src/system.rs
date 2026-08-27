@@ -45,7 +45,7 @@ fn stage1(syscon: &mut SYSCON, flashctrl: &mut FLASHCTRL) {
         .modify(|_, writer| writer.syspll_pd().powered());
 
     // Wait until System PLL clock is ready
-    while syscon.syspllstat.read().lock().is_pll_locked() {}
+    while syscon.syspllstat.read().lock().is_pll_not_locked() {}
 
     // Setup AHB clock divisor to 1.
     syscon
@@ -100,7 +100,7 @@ fn stage1(syscon: &mut SYSCON, flashctrl: &mut FLASHCTRL) {
     });
 
     // Wait until USB PLL clock is ready
-    while syscon.usbpllstat.read().lock().is_pll_locked() {}
+    while syscon.usbpllstat.read().lock().is_pll_not_locked() {}
 
     // Enable IOCON clock
     syscon

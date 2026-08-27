@@ -1,10 +1,6 @@
 use core::panic::PanicInfo;
-use embedded_hal::blocking::delay::DelayMs;
-use lpc11uxx::CorePeripherals;
-use lpc11uxx_hal::delay::Delay;
 
 use crate::led;
-use crate::system::{CRYSTAL_OSCILLATOR_CLOCK_RATE, SYSTEM_PPL_MSET};
 
 #[inline(never)]
 #[panic_handler]
@@ -12,15 +8,18 @@ fn panic(_info: &PanicInfo) -> ! {
     led_panic(0x1000, 1000)
 }
 
+/// Busy-wait roughly `ms` milliseconds at ~48 MHz (no SysTick / HAL Delay).
+fn spin_ms(ms: u32) {
+    // Empirically tuned for ~48 MHz; panic path does not need exact timing.
+    for _ in 0..ms {
+        for _ in 0..12_000 {
+            cortex_m::asm::nop();
+        }
+    }
+}
+
 pub fn led_panic(start_intensity: u16, delay_ms: u32) -> ! {
     led::initialize();
-
-    let peripherals = unsafe { CorePeripherals::steal() };
-
-    let mut delay = Delay::new(
-        peripherals.SYST,
-        CRYSTAL_OSCILLATOR_CLOCK_RATE * u32::from(SYSTEM_PPL_MSET),
-    );
 
     let mut intensity = start_intensity;
     loop {
@@ -31,20 +30,13 @@ pub fn led_panic(start_intensity: u16, delay_ms: u32) -> ! {
         } else {
             intensity = 0;
         }
-        delay.delay_ms(delay_ms);
+        spin_ms(delay_ms);
     }
 }
 
 #[allow(unused)]
 pub fn led_blink_n_times(start_intensity: u16, n: u32) {
     led::initialize();
-
-    let peripherals = unsafe { CorePeripherals::steal() };
-
-    let mut delay = Delay::new(
-        peripherals.SYST,
-        CRYSTAL_OSCILLATOR_CLOCK_RATE * u32::from(SYSTEM_PPL_MSET),
-    );
 
     let mut intensity = start_intensity;
     for _i in 0..n * 2 {
@@ -55,6 +47,6 @@ pub fn led_blink_n_times(start_intensity: u16, n: u32) {
         } else {
             intensity = 0;
         }
-        delay.delay_ms(1000);
+        spin_ms(1000);
     }
 }

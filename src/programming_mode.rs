@@ -671,7 +671,7 @@ fn ct16b1_timer_reset() {
 
     let backup_tcr = peripherals.CT16B1.tcr.read().bits();
 
-    peripherals.CT16B1.tcr.write_with_zero(|v| v);
+    peripherals.CT16B1.tcr.write(|v| v);
     peripherals.CT16B1.tc.write(|v| unsafe { v.tc().bits(1) });
     peripherals.CT16B1.tcr.write(|v| v.crst().reset());
 
@@ -791,18 +791,20 @@ fn reinvoke_isp() {
     core_peripherals.SYST.disable_interrupt();
 
     unsafe {
-        asm!("
-        ldr r0, =0x10001fe0
-        msr msp, r0
-        blx r1
-        dont_return:
-        wfi
-        b dont_return
-        ", in("r1") reinvoke_isp_inner as extern fn());
+        core::arch::asm!(
+            "ldr r0, =0x10001fe0",
+            "msr msp, r0",
+            "blx r1",
+            "1:",
+            "wfi",
+            "b 1b",
+            in("r1") reinvoke_isp_inner as extern "C" fn(),
+            options(noreturn)
+        );
     }
 }
 
-extern fn reinvoke_isp_inner() {
+extern "C" fn reinvoke_isp_inner() {
     let core_peripherals = unsafe { CorePeripherals::steal() };
 
     for i in 0..0x1b {

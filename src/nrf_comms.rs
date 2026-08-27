@@ -30,7 +30,7 @@ pub fn init_usart(syscon: &SYSCON, usart: &USART, nvic: &mut NVIC, scb: &mut SCB
     // Chip_UART_Init
     syscon.sysahbclkctrl.modify(|_, writer| writer.usart().enabled());
     syscon.uartclkdiv.write(|v| unsafe { v.div().bits(1) });
-    usart.fcr_mut().write(|v| v
+    usart.fcr().write(|v| v
         .fifoen().enabled()
         .rxfifores().clear()
         .txfifores().clear());
@@ -40,7 +40,7 @@ pub fn init_usart(syscon: &SYSCON, usart: &USART, nvic: &mut NVIC, scb: &mut SCB
     usart.fdr.write(|v| unsafe { v.mulval().bits(1) });
 
     // ChipUART_SetupFifos
-    usart.fcr_mut().write(|v| v
+    usart.fcr().write(|v| v
         .fifoen().enabled()
         .rxtl().level2());
 
@@ -59,8 +59,8 @@ pub fn init_usart(syscon: &SYSCON, usart: &USART, nvic: &mut NVIC, scb: &mut SCB
     // Disable access to the divisor registers, restore access to USART read/write registers.
     usart.lcr.modify(|_, v| v.dlab().disable_access_to_di());
 
-    unsafe { nvic.enable(Interrupt::USART) };
-    usart.ier_mut().modify(|_, v| v
+    unsafe { NVIC::unmask(Interrupt::USART) };
+    usart.ier().modify(|_, v| v
         .rbrinten().enable_the_rda_inter()
         .rlsinten().enable_the_rls_inter());
 
@@ -96,13 +96,13 @@ pub fn handle_interrupt(mut usart: &mut USART) {
     if usart.ier().read().threinten().bit_is_set() {
         while usart.lsr.read().thre().bit_is_set() {
             if let Some(val) = unsafe { USART_WRITE_RING_BUFFER.dequeue() } {
-                usart.thr_mut().write(|v| unsafe { v.thr().bits(val) });
+                usart.thr().write(|v| unsafe { v.thr().bits(val) });
             } else {
                 break;
             }
         }
         if unsafe { USART_WRITE_RING_BUFFER.is_empty() } {
-            usart.ier_mut().modify(|_, v| v.threinten().clear_bit());
+            usart.ier().modify(|_, v| v.threinten().clear_bit());
         }
     }
 }
@@ -192,7 +192,7 @@ fn usart_send_raw_str(data: &[u8]) -> usize {
     let peripherals = unsafe { Peripherals::steal() };
 
     // First, disable send interrupts.
-    peripherals.USART.ier_mut().modify(|_, v| v.threinten().disable_the_thre_int());
+    peripherals.USART.ier().modify(|_, v| v.threinten().disable_the_thre_int());
 
     // Insert data to the ring buffer
     let mut inserted_len = ring_buffer_insert_mult(unsafe { &mut USART_WRITE_RING_BUFFER }, data);
@@ -200,7 +200,7 @@ fn usart_send_raw_str(data: &[u8]) -> usize {
     // Send the contents of the ring buffer
     while peripherals.USART.lsr.read().thre().is_empty() {
         if let Some(val) = unsafe { USART_WRITE_RING_BUFFER .dequeue() } {
-            peripherals.USART.thr_mut().write(|v| unsafe { v.thr().bits(val) });
+            peripherals.USART.thr().write(|v| unsafe { v.thr().bits(val) });
         } else {
             break;
         }
@@ -210,7 +210,7 @@ fn usart_send_raw_str(data: &[u8]) -> usize {
     inserted_len += ring_buffer_insert_mult(unsafe { &mut USART_WRITE_RING_BUFFER }, &data[inserted_len..]);
 
     // Re-enable send interrupts
-    peripherals.USART.ier_mut().modify(|_, v| v.threinten().enable_the_thre_inte());
+    peripherals.USART.ier().modify(|_, v| v.threinten().enable_the_thre_inte());
 
     inserted_len
 }

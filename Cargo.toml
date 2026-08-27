@@ -1,20 +1,35 @@
-[workspace]
+[package]
+name = "steam-controller-bootloader"
+version = "0.1.0"
+edition = "2018"
+description = "Steam Controller LPC11U37F boot block (Valve HID programming mode)"
+authors = ["roblabla <unfiltered@roblab.la>"]
 
-members = [
-    "firmware",
-    "bootloader",
-    "driver-cli"
-]
+[[bin]]
+name = "steam-controller-bootloader"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+cortex-m = "0.7"
+cortex-m-rt = "0.6.10"
+embedded-hal = "0.2.3"
+# crates.io 0.3.0 drops overlapping USART regs; git master has fcr/thr/dll for nrf_comms.
+lpc11uxx = { git = "https://github.com/lpc-rs/lpc-pac", features = ["rt"] }
+static_assertions = "1.1.0"
+lpc11uxx-rom = { path = "lpc11uxx-rom" }
+heapless = "0.5"
+vcell = "0.1.2"
+bitflags = "1.2"
+bitfield = "0.13"
+
+[profile.dev]
+panic = "abort"
 
 [profile.release]
-codegen-units = 1 # better optimizations
-debug = true # symbols are nice and they don't increase the size on Flash
-lto = true # better optimizations
-opt-level = 'z'
-panic = 'abort'
-
-#[patch.crates-io.usb-device]
-#path = "../usb-device"
-
-[patch.crates-io.lpc11uxx]
-git = "https://github.com/roblabla/lpc-pac"
+codegen-units = 1
+debug = true
+lto = true
+opt-level = "z"
+panic = "abort"

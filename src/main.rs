@@ -1,7 +1,5 @@
 #![no_std]
 #![no_main]
-#![feature(asm, const_loop, const_if_match, const_panic, const_fn)]
-#![feature(panic_info_message)]
 
 mod usb_descriptors;
 mod system;
@@ -175,28 +173,18 @@ fn setup_watchdog(syscon: &SYSCON, watchdog: &WWDT, timeout: u32) {
 }
 
 fn start_program2() -> ! {
-    // ASM is slightly different for efficiency's sake.
+    // Point VTOR at the app vector table so its IRQ handlers run directly.
     unsafe {
-        asm!("
-            // Get program2 vector table
-            ldr r0, =0x2000
-
-            // Load MSP with program2 master stack pointer
-            ldr r1, [r0]
-            msr msp, r1
-
-            // Jump to program2 reset vector
-            ldr r1, [r0, 4]
-            bx r1
-
-            test:
-            wfi
-            b test
-        ");
-    }
-    // We shouldn't end up here
-    loop {
-        cortex_m::asm::wfi();
+        core::arch::asm!(
+            "ldr r0, =0x2000",
+            "ldr r1, =0xE000ED08",
+            "str r0, [r1]",
+            "ldr r1, [r0]",
+            "msr msp, r1",
+            "ldr r1, [r0, #4]",
+            "bx r1",
+            options(noreturn)
+        );
     }
 }
 
@@ -224,7 +212,7 @@ fn main() -> ! {
 
     // If a brown-out is detected, we should kill the battery and die.
     if !usb_disconnected && peripherals.SYSCON.sysrststat.read().bod().bit_is_set() {
-        peripherals.SYSCON.sysrststat.write_with_zero(|f| f.bod().reset_clear());
+        peripherals.SYSCON.sysrststat.write(|f| f.bod().reset_clear());
         set_battery_power(&mut peripherals.GPIO_PORT, false);
         loop {
             cortex_m::asm::wfi();
@@ -281,212 +269,36 @@ fn main() -> ! {
 }
 
 #[exception]
-fn NonMaskableInt() {
-    let program2_hdlr = unsafe { *(0x2008 as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[exception]
-fn HardFault(_frame: &cortex_m_rt::ExceptionFrame) -> ! {
-    let program2_hdlr = unsafe { *(0x200c as *const extern fn()) };
-    program2_hdlr();
+fn DefaultHandler(_irq: i16) {
     loop {
         cortex_m::asm::wfi();
     }
 }
 
 #[exception]
-fn SVCall() {
-    let program2_hdlr = unsafe { *(0x202c as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[exception]
-fn PendSV() {
-    // TODO
-    let peripherals = unsafe { Peripherals::steal() };
-
-    if peripherals.PMU.gpreg[1].read().bits() == 0 {
-        programming_mode::PendSV();
-    } else {
-        let program2_hdlr = unsafe { *(0x2038 as *const extern fn()) };
-        program2_hdlr();
+fn HardFault(_frame: &cortex_m_rt::ExceptionFrame) -> ! {
+    loop {
+        cortex_m::asm::wfi();
     }
 }
 
+// Programming-mode handlers only — app IRQs use VTOR after start_program2.
 #[exception]
-fn SysTick() {
-    let program2_hdlr = unsafe { *(0x203c as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn PIN_INT0() {
-    let program2_hdlr = unsafe { *(0x2040 as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn PIN_INT1() {
-    let program2_hdlr = unsafe { *(0x2044 as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn PIN_INT2() {
-    let program2_hdlr = unsafe { *(0x2048 as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn PIN_INT3() {
-    let program2_hdlr = unsafe { *(0x204c as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn PIN_INT4() {
-    let program2_hdlr = unsafe { *(0x2050 as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn PIN_INT5() {
-    let program2_hdlr = unsafe { *(0x2054 as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn PIN_INT6() {
-    let program2_hdlr = unsafe { *(0x2058 as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn PIN_INT7() {
-    let program2_hdlr = unsafe { *(0x205c as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn GINT0() {
-    let program2_hdlr = unsafe { *(0x2060 as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn GINT1() {
-    let program2_hdlr = unsafe { *(0x2064 as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn SSP1() {
-    let program2_hdlr = unsafe { *(0x2078 as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn I2C() {
-    let program2_hdlr = unsafe { *(0x207c as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn CT16B0() {
-    let program2_hdlr = unsafe { *(0x2080 as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn CT16B1() {
-    let program2_hdlr = unsafe { *(0x2084 as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn CT32B0() {
-    let program2_hdlr = unsafe { *(0x2088 as *const extern fn()) };
-    program2_hdlr();
+fn PendSV() {
+    programming_mode::PendSV();
 }
 
 #[interrupt]
 fn CT32B1() {
-    // TODO
-    let peripherals = unsafe { Peripherals::steal() };
-
-    if peripherals.PMU.gpreg[1].read().bits() == 0 {
-        programming_mode::CT32B1();
-    } else {
-        let program2_hdlr = unsafe { *(0x208c as *const extern fn()) };
-        program2_hdlr();
-    }
-}
-
-#[interrupt]
-fn SSP0() {
-    let program2_hdlr = unsafe { *(0x2090 as *const extern fn()) };
-    program2_hdlr();
+    programming_mode::CT32B1();
 }
 
 #[interrupt]
 fn USART() {
-    // TODO
-    let peripherals = unsafe { Peripherals::steal() };
-
-    if peripherals.PMU.gpreg[1].read().bits() == 0 {
-        programming_mode::USART();
-    } else {
-        let program2_hdlr = unsafe { *(0x2094 as *const extern fn()) };
-        program2_hdlr();
-    }
+    programming_mode::USART();
 }
 
 #[interrupt]
 fn USB_IRQ() {
-    // TODO
-    let peripherals = unsafe { Peripherals::steal() };
-
-    if peripherals.PMU.gpreg[1].read().bits() == 0 {
-        programming_mode::USB_IRQ();
-    } else {
-        let program2_hdlr = unsafe { *(0x2098 as *const extern fn()) };
-        program2_hdlr();
-    }
-}
-
-#[interrupt]
-fn USB_FIQ() {
-    let program2_hdlr = unsafe { *(0x209c as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn ADC() {
-    let program2_hdlr = unsafe { *(0x20a0 as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn WDT() {
-    let program2_hdlr = unsafe { *(0x20a4 as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn BOD_IRQ() {
-    let program2_hdlr = unsafe { *(0x20a8 as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn FLASH_IRQ() {
-    let program2_hdlr = unsafe { *(0x20ac as *const extern fn()) };
-    program2_hdlr();
-}
-
-#[interrupt]
-fn USBWAKEUP() {
-    let program2_hdlr = unsafe { *(0x20b8 as *const extern fn()) };
-    program2_hdlr();
+    programming_mode::USB_IRQ();
 }
