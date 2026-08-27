@@ -59,6 +59,26 @@ Or with cargo-make:
 $ cargo make
 ```
 
+## Flash
+
+Hold **Right Trigger** and plug in USB to get the `CRP DISABLD` drive, then either:
+
+**Bootloader only** (leaves any existing app in place):
+
+```bash
+sudo dd conv=nocreat,notrunc oflag=direct bs=512 if=bootloader-release.bin of="/media/$USER/CRP DISABLD/firmware.bin"
+sync
+```
+
+**Bootloader + wipe app** (zeros 4 KiB after the boot block so the app token at `0x2024` is cleared):
+
+```bash
+cat bootloader-release.bin <(dd if=/dev/zero bs=4096 count=1 status=none) | sudo dd conv=nocreat,notrunc oflag=direct bs=512 of="/media/$USER/CRP DISABLD/firmware.bin"
+sync
+```
+
+Unplug/replug normally.
+
 # License
 
 This crate is licensed under either of
